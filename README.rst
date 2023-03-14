@@ -37,7 +37,10 @@ zero2hero
     Add a short description here!
 
 
-A longer description of your project goes here...
+Points:
+
+1. If the architecture is too large, you might end up with overfitting the train set.
+(Ex. well learned TriGram will never sample new unique names, but repeat ones from train set)
 
 
 .. _pyscaffold-notes:
