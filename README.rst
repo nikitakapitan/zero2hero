@@ -34,7 +34,7 @@ zero2hero
 =========
 
 
-    Add a short description here!
+    Add a short description here! Okay?
 
 
 Points:
