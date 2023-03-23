@@ -2,26 +2,61 @@
 # Manual definition of NN modules similar to torch.nn
 import torch
 
-class Linaer:
+class Linear:
 
     def __init__(self, fan_in, fan_out, bias=True):
-        self.weight = torch.randn((fan_in, fan_out) / fan_in**0.5) # kaiming init
+        self.weight = torch.randn((fan_in, fan_out)) / fan_in**0.5 # kaiming init
         self.bias = torch.zeros(fan_out) if bias else None
 
     def __call__(self, x):
         z = x @ self.weight
-        if self.bias:
+        if self.bias is not None:
             z += self.bias
         return z
 
     def parameters(self):
-        return [self.weight] + ([self.bias] if self.bias else [])
+        return [self.weight] + ([] if self.bias is None else [self.bias])
 
 class Tanh:
     def __call__(self, x):
         return torch.tanh(x)
     def parameters(self):
         return []
+
+class Embeddings:
+
+    def __init__(self, input_size, emb_size):
+        self.emb = torch.randn((input_size, emb_size))
+
+    def __call__(self, x):
+        self.out = self.emb[x]
+        return self.out
+
+    def parameters(self):
+        return [self.emb]
+
+class Flatten:
+
+    def __call__(self, x):
+        self.out = x.view(x.shape[0], -1)
+        return self.out
+    
+    def parameters(self):
+        return []
+
+class Sequential:
+
+    def __init__(self, layers):
+        self.layers = layers
+
+    def __call__(self, x):
+        for layer in self.layers:
+            x = layer(x)
+        self.out = x
+        return self.out
+    
+    def parameters(self):
+        return [p for p in layer.parameters for layer in self.layers]
 
 class BatchNorm1d:
 
@@ -42,7 +77,7 @@ class BatchNorm1d:
             z_var = x.var(axis=0, keepdim=True)
         else:
             z_mean = self.run_mean
-            z_var = self.run_svar
+            z_var = self.run_var
 
         z = (x - z_mean) / torch.sqrt(z_var+ self.eps)
         out = self.bn_gain * z + self.bn_bias
