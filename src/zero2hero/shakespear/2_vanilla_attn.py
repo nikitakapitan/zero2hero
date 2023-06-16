@@ -1,3 +1,17 @@
+"""Neuro-based Bigram LM
+
+The difference with BLM:
+• torch.nn.Embeddings (token emb)
+• torch.nn.Embeddings (positional emb)
++ Key / Query nn.Linear
+• nn.Linear
+
+Note:
+Query - what I am interested in
+Key - what I have
+Value - What I will give you
+"""
+
 import numpy as np
 import torch
 
@@ -8,6 +22,8 @@ EVAL_ITERS = 200    # how many batches to average for eval loss estimate
 EVAL_INTERVAL = 300 # how often to compute eval loss estimate
 LR = 1e-2
 DEVICE = 'cuda' if torch.cuda.is_available() else 'cpu'
+EMB_SIZE = 32
+HEAD_SIZE = 16
 
 # open shakespear
 with open('docs/shakespear.txt', 'r', encoding='utf-8') as f:
@@ -54,15 +70,48 @@ def estimate_loss():
     return {'train': train_losses.mean(), 'val': val_losses.mean()}
         
 
-class BigramLanguageModel(torch.nn.Module):
-    # Neuro-based BLM
+class VanillaAttentionLM(torch.nn.Module):
+    # Neuro-based BLM with vanulla attention
 
-    def __init__(self, vocab_size):
+    def __init__(self, vocab_size, emb_size, head_size):
         super().__init__()
-        self.token_emb_table = torch.nn.Embedding(vocab_size, vocab_size)
+
+        # embed token value to some low-lev representation
+        self.token_emb_table = torch.nn.Embedding(vocab_size, emb_size)
+        # embed token position to some low-lev representation
+        self.position_emb_table = torch.nn.Embedding(BLOCK_SIZE, emb_size)
+
+        self.key = torch.nn.Linear(emb_size, head_size, bias=False)
+        self.query = torch.nn.Linear(emb_size, head_size, bias=False)
+        self.register_buffer('triang', torch.tril(torch.ones(BLOCK_SIZE, BLOCK_SIZE)))
+
+        self.value = torch.nn.Linear(emb_size, head_size, bias=False)
+
+        self.fc = torch.nn.Linear(head_size, vocab_size)
 
     def forward(self, idx, targets=None):
-        logits = self.token_emb_table(idx)
+        B,T = idx.shape # (B, T)
+
+        tok_emb = self.token_emb_table(idx) # (Batch, Time, Emb)
+        key = self.key(tok_emb) # (B, T, V)
+        query = self.query(tok_emb) # (B, T, H)
+        # query (B, T, H) @ key.T (B, H, T)
+        score = query @ key.transpose(1, 2) # (B, T, T)
+
+        # mask future tokens (do not allow future communication)
+        masked_score = score.masked_fill(self.triang[:T, :T] == 0, float('-inf'))
+
+        p_attn = torch.nn.functional.softmax(masked_score, dim=-1) # (B, T, T)
+
+        # tok_emb (B, T, E)
+        value = self.value(tok_emb) # (B, T, H)
+
+        # p_attn (B, T, T) @ value (B, T, H)
+        context = p_attn @ value # (B, T, H)
+
+
+        logits = self.fc(context) # (Batch, Time, Vocab)
+
         if targets is not None:
             B,T,C = logits.shape
             logits = logits.view(B*T, C)
@@ -78,8 +127,8 @@ class BigramLanguageModel(torch.nn.Module):
         idx (B, T)
         """
         for _ in range(max_new_tokens):
-
-            logits, loss = self(idx) # (B, T, C)
+            idx_crop = idx[:, -BLOCK_SIZE:]
+            logits, loss = self(idx_crop) # (B, T, C)
 
             # context : use only last char
             logits = logits[:, -1, :] # (B, C)
@@ -90,7 +139,7 @@ class BigramLanguageModel(torch.nn.Module):
             idx = torch.cat((idx, idx_next), dim=1) # (B, T+1) 
         return idx
     
-model = BigramLanguageModel(vocab_size=vocab_size)
+model = VanillaAttentionLM(vocab_size=vocab_size, emb_size=EMB_SIZE, head_size=HEAD_SIZE)
 model = model.to(DEVICE)
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
